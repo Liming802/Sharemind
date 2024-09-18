@@ -31,11 +31,9 @@ function getRandomPosition() {
 
     // Save this position for future comparisons
     inputBoxPositions.push({ x: randomX, y: randomY });
-
     return { x: randomX, y: randomY };
 }
 
-// Function to create an input box
 function createInputBox() {
  
     const inputBox = document.createElement('input');
@@ -58,7 +56,6 @@ function createInputBox() {
     }
     document.body.appendChild(inputBox);
 
-    // Add event listener to the input box
     inputBox.addEventListener('keydown', function (event) {
         // Check if the Enter key is pressed
         if (event.key === 'Enter') {
@@ -74,8 +71,6 @@ function createInputBox() {
 
             // Clear the current input box
             inputBox.value = '';
-
-            // Create a new input box at a random position
             createInputBox();
         }
     });
