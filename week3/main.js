@@ -1,62 +1,74 @@
-let inputLocationX = window.innerWidth / 2;
-let inputLocationY = window.innerHeight / 2;
-let inputBoxDirectionX = Math.random() < 0.5 ? 1 : -1;
-let inputBoxDirectionY = Math.random() < 0.5 ? 1 : -1;
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-app.js";
+import { getDatabase, ref, off, onValue, update, set, push, onChildAdded, onChildChanged, onChildRemoved } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-database.js";
 
+let myObjectsByFirebaseKey = {};
 let canvas;
 let inputBox;
-let images = [];
+let db;
+let existingSubscribedFolder = null;
+let selectedImageKey = null; // Records the selected image
+
 const url = "https://replicate-api-proxy.glitch.me/create_n_get/";
-let collisionDetectionEnabled = false;
+let exampleName = "SharedMindsExample";
 
-init();
+initFirebaseDB();
+initHTML();
+subscribeToData();
+animate();
 
-function init() {
-    loadSavedImages(); // 加载保存的图片
-    initInterface();
-    animate();
-}
-
-// Animate loop
 function animate() {
-    for (let imgObj of images) {
-        if (!imgObj.isClicked) { // 只有未点击的图片会移动
-            imgObj.x += imgObj.directionX * 2; 
-            imgObj.y += imgObj.directionY * 2;
+    let ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            imgObj.container.style.left = imgObj.x + 'px';
-            imgObj.container.style.top = imgObj.y + 'px';
+    for (let key in myObjectsByFirebaseKey) {
+        let thisObject = myObjectsByFirebaseKey[key];
 
-            if (imgObj.x < 0 || imgObj.x + imgObj.width > window.innerWidth) {
-                imgObj.directionX *= -1; 
+        if (thisObject.type === "image") {
+            // Random movement for non-selected images
+            if (selectedImageKey !== key) {
+                thisObject.position.x += (Math.random() - 0.5) * 2;
+                thisObject.position.y += (Math.random() - 0.5) * 2;
+
+                // Constrain position within canvas
+                thisObject.position.x = Math.max(0, Math.min(canvas.width - 256, thisObject.position.x));
+                thisObject.position.y = Math.max(0, Math.min(canvas.height - 256, thisObject.position.y));
             }
-            if (imgObj.y < 0 || imgObj.y + imgObj.height > window.innerHeight) {
-                imgObj.directionY *= -1;
+
+            let position = thisObject.position;
+            let img = thisObject.loadedImage;
+            if (img) {
+                ctx.fillStyle = "white";
+                ctx.font = "30px Arial";
+                ctx.fillText(thisObject.prompt, position.x, position.y - 30);
+                ctx.drawImage(img, position.x, position.y, 256, 256);
             }
+        } else if (thisObject.type === "text") {
+            let position = thisObject.position;
+            ctx.font = "30px Arial";
+            ctx.fillText(thisObject.text, position.x, position.y);
         }
     }
 
-    if (collisionDetectionEnabled) {
-        for (let i = 0; i < images.length; i++) {
-            for (let j = i + 1; j < images.length; j++) {
-                if (!images[i].isClicked && !images[j].isClicked && checkCollision(images[i], images[j])) {
-                    regenerateImages(i, j);
-                }
-            }
+    // Draw enlarged image on top layer
+    if (selectedImageKey) {
+        const selectedImageObject = myObjectsByFirebaseKey[selectedImageKey];
+        if (selectedImageObject && selectedImageObject.loadedImage) {
+            const img = selectedImageObject.loadedImage;
+            const position = selectedImageObject.position;
+            ctx.drawImage(img, position.x - (256 * 0.5), position.y - (256 * 0.5), 256 * 1.5, 256 * 1.5); // Enlarge 1.5x
         }
     }
 
     requestAnimationFrame(animate);
 }
 
-function checkCollision(imgA, imgB) {
-    return !(imgA.x > imgB.x + imgB.width || 
-             imgA.x + imgA.width < imgB.x || 
-             imgA.y > imgB.y + imgB.height || 
-             imgA.y + imgA.height < imgB.y);
+function clearLocalScene() {
+    myObjectsByFirebaseKey = {};
+    let ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-async function askPictures(prompt) {
+async function askPictures(prompt, location) {
     document.body.style.cursor = "progress";
     const data = {
         version: "ac732df83cea7fff18b8472768c88ad041fa750ff7682a21affe81863cbe77e4",
@@ -64,7 +76,6 @@ async function askPictures(prompt) {
             prompt: prompt,
         },
     };
-    console.log("Making a Fetch Request", data);
     const options = {
         method: "POST",
         headers: {
@@ -77,151 +88,145 @@ async function askPictures(prompt) {
     const picture_info = await fetch(url, options);
     const proxy_said = await picture_info.json();
 
-    if (proxy_said.output.length == 0) {
+    if (proxy_said.output.length === 0) {
         console.log("Something went wrong, try it again");
     } else {
-        let img = document.createElement("img");
-        img.src = proxy_said.output[0];
-        img.style.width = '128px';
-        img.style.height = '128px';
-        img.style.borderRadius = '50%';
-        img.style.position = 'absolute';
-
-        let container = document.createElement('div');
-        container.style.position = 'absolute';
-        container.style.overflow = 'hidden';
-        container.style.width = '128px';
-        container.style.height = '128px';
-        container.style.borderRadius = '50%';
-        container.style.clipPath = 'circle(50%)';
-        container.appendChild(img);
-
-        // Add click event listener to the image
-        img.addEventListener('click', function() {
-            img.style.width = '256px';
-            img.style.height = '256px';
-            container.style.width = '256px';
-            container.style.height = '256px';
-            container.style.clipPath = 'circle(128px)';
-            images.forEach(imgObj => imgObj.isClicked = true); // 标记为已点击
-            saveImageData(); // 保存已放大的图片
-        });
-
-        let x = Math.random() * (window.innerWidth - 128);
-        let y = Math.random() * (window.innerHeight - 128);
-        container.style.left = x + 'px';
-        container.style.top = y + 'px';
-        document.body.appendChild(container);
-        
-        // Store image info
-        images.push({
-            img,
-            container,
-            x,
-            y,
-            width: img.width,
-            height: img.height,
-            directionX: Math.random() < 0.5 ? 1 : -1,
-            directionY: Math.random() < 0.5 ? 1 : -1,
-            isClicked: false
-        });
-        
-        if (images.length >= 2) {
-            collisionDetectionEnabled = true;
-        }
+        addImageRemote(proxy_said.output[0], prompt, location);
     }
     document.body.style.cursor = "auto";
 }
 
+export function addTextRemote(text, pos) {
+    let title = document.getElementById("title").value;
+    const data = { type: "text", position: { x: pos.x, y: pos.y }, text: text };
+    let folder = exampleName + "/" + title;
+    addNewThingToFirebase(folder, data);
+}
 
-function regenerateImages(indexA, indexB) {
-    // 防止放大的图片被删除
-    if (!images[indexA].isClicked && !images[indexB].isClicked) {
-        document.body.removeChild(images[indexA].container);
-        document.body.removeChild(images[indexB].container);
-        images.splice(Math.max(indexA, indexB), 1);
-        images.splice(Math.min(indexA, indexB), 1);
+export function addImageRemote(imgURL, prompt, pos) {
+    let title = document.getElementById("title").value;
+    pos = {
+        x: Math.random() * (canvas.width - 256),
+        y: Math.random() * (canvas.height - 256),
+    };
 
-        askPictures("new prompt for image A");
-        askPictures("new prompt for image B");
+    const data = { type: "image", prompt: prompt, position: pos, imageURL: imgURL };
+    let folder = exampleName + "/" + title;
+    addNewThingToFirebase(folder, data);
+}
+
+// Initialize Firebase Database
+function initFirebaseDB() {
+    const firebaseConfig = {
+        apiKey: "AIzaSyBRA7oN1C9Cm0CKCVys0WUzl_7umMIYdiA",
+        authDomain: "shared-mind.firebaseapp.com",
+        databaseURL: "https://shared-mind-default-rtdb.firebaseio.com",
+        projectId: "shared-mind",
+        storageBucket: "shared-mind.appspot.com",
+        messagingSenderId: "1050804828540",
+        appId: "1:1050804828540:web:b88433b3bf02b9361c4cf9",
+        measurementId: "G-YJC9GF5V87"
+    };
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase();
+}
+
+function addNewThingToFirebase(folder, data) {
+    const dbRef = ref(db, folder);
+    push(dbRef, data);
+}
+
+// Subscribe to data from Firebase
+function subscribeToData() {
+    clearLocalScene();
+    let title = document.getElementById("title").value;
+    let folder = exampleName + "/" + title;
+    if (existingSubscribedFolder) {
+        const oldRef = ref(db, existingSubscribedFolder);
+        off(oldRef);
     }
-}
+    existingSubscribedFolder = folder;
 
-// 保存图片数据
-function saveImageData() {
-    let savedImages = images
-        .filter(imgObj => imgObj.isClicked) 
-        .map(imgObj => ({
-            src: imgObj.img.src,
-            x: imgObj.x,
-            y: imgObj.y,
-            width: imgObj.img.style.width,
-            height: imgObj.img.style.height
-        }));
-    localStorage.setItem('savedImages', JSON.stringify(savedImages));
-}
+    const thisRef = ref(db, folder);
+    onChildAdded(thisRef, (snapshot) => {
+        let key = snapshot.key;
+        let data = snapshot.val();
+        myObjectsByFirebaseKey[key] = data;
 
+        if (data.type === "image") {
+            let img = new Image();
+            img.onload = function () {
+                img.setAttribute("id", key + "_image");
+                myObjectsByFirebaseKey[key].loadedImage = img;
 
-function loadSavedImages() {
-    let savedImages = JSON.parse(localStorage.getItem('savedImages') || '[]');
-    savedImages.forEach(imgData => {
-        let img = document.createElement("img");
-        img.src = imgData.src;
-        img.style.width = imgData.width;
-        img.style.height = imgData.height;
-        img.style.borderRadius = '50%';
-        img.style.position = 'absolute';
+                // Add event listener to the image after it is loaded
+                img.addEventListener("click", () => {
+                    handleImageClick(key);
+                });
+            }
+            img.src = data.imageURL;
+        }
+    });
 
-        let container = document.createElement('div');
-        container.style.position = 'absolute';
-        container.style.overflow = 'hidden';
-        container.style.width = imgData.width;
-        container.style.height = imgData.height;
-        container.style.borderRadius = '50%';
-        container.style.clipPath = 'circle(50%)';
-        container.appendChild(img);
+    onChildChanged(thisRef, (data) => {
+        let key = data.key;
+        let thisObject = myObjectsByFirebaseKey[key];
+        if (thisObject) {
+            thisObject.text = data.val().text;
+            thisObject.position = data.val().position;
+            thisObject.size = data.val().size; 
+        }
+    });
 
-        container.style.left = imgData.x + 'px';
-        container.style.top = imgData.y + 'px';
-        document.body.appendChild(container);
-
-        images.push({
-            img,
-            container,
-            x: imgData.x,
-            y: imgData.y,
-            width: parseInt(imgData.width),
-            height: parseInt(imgData.height),
-            directionX: 0,
-            directionY: 0,
-            isClicked: true
-        });
+    onChildRemoved(thisRef, (data) => {
+        let key = data.key;
+        delete myObjectsByFirebaseKey[key];
     });
 }
 
-function initInterface() {
-    document.body.style.backgroundColor = 'black';
-    
+function handleImageClick(key) {
+    const thisObject = myObjectsByFirebaseKey[key];
+
+    // If no size, set default size
+    if (!thisObject.size) {
+        thisObject.size = { width: 256, height: 256 }; // Default size
+    }
+
+    // Each click enlarges 1.5 times
+    thisObject.size.width *= 1.5;
+    thisObject.size.height *= 1.5;
+
+    // Update database to save new size
+    const updatedData = {
+        ...thisObject,
+        size: thisObject.size // Save new size
+    };
+
+    let title = document.getElementById("title").value;
+    let folder = exampleName + "/" + title;
+    update(ref(db, folder + '/' + key), updatedData);
+}
+
+// Initialize HTML interface
+function initHTML() {
     canvas = document.createElement('canvas');
     canvas.setAttribute('id', 'myCanvas');
     canvas.style.position = 'absolute';
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    canvas.style.left = '0';
-    canvas.style.top = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
     document.body.appendChild(canvas);
+
+    // Set pointer events to allow clicks
+    canvas.style.pointerEvents = 'auto'; // Enable click events on canvas
 
     inputBox = document.createElement('input');
     inputBox.setAttribute('type', 'text');
     inputBox.setAttribute('id', 'inputBox');
-    inputBox.setAttribute('placeholder', 'Keep Writing');
+    inputBox.setAttribute('placeholder', 'What do you think');
     inputBox.style.position = 'absolute';
     inputBox.style.left = '50%';
     inputBox.style.top = '50%';
     inputBox.style.transform = 'translate(-50%, -50%)';
-    inputBox.style.zIndex = '100';
     inputBox.style.fontSize = '30px';
     inputBox.style.fontFamily = 'Arial';
     document.body.appendChild(inputBox);
@@ -230,7 +235,32 @@ function initInterface() {
     inputBox.addEventListener('keydown', function (event) {
         if (event.key === 'Enter') {
             const inputValue = inputBox.value;
-            askPictures(inputValue);
+            let inputBoxLocation = inputBox.getBoundingClientRect();
+            let pos = { x: inputBoxLocation.left, y: inputBoxLocation.top };
+            askPictures(inputValue, pos);
         }
     });
+
+    const titleBox = document.createElement('input');
+    titleBox.setAttribute('type', 'text');
+    titleBox.setAttribute('id', 'title');
+    titleBox.value = 'War and Peace';
+    titleBox.style.position = 'absolute';
+    titleBox.style.left = '50%';
+    titleBox.style.top = '10%';
+    titleBox.style.transform = 'translate(-50%, -50%)';
+    titleBox.style.fontSize = '20px';
+    titleBox.style.fontFamily = 'Arial';
+    document.body.appendChild(titleBox);
+
+    const titleLabel = document.createElement('label');
+    titleLabel.setAttribute('for', 'title');
+    titleLabel.textContent = 'Title:';
+    titleLabel.style.position = 'absolute';
+    titleLabel.style.left = '50%';
+    titleLabel.style.top = '3%';
+    titleLabel.style.transform = 'translate(-50%, -50%)';
+    titleLabel.style.fontSize = '15px';
+    titleLabel.style.fontFamily = 'Arial';
+    document.body.appendChild(titleLabel);
 }
