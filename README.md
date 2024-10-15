@@ -1,1 +1,1 @@
-The second week's assignmen
+Every weeks' assignment
