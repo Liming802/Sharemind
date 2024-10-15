@@ -1,0 +1,60 @@
+<html>
+
+<head>
+    <title>Other People 2D Distance Fake Auth</title>
+    <meta charset="UTF-8">
+    <meta http-equiv='cache-control' content='no-cache'>
+    <meta http-equiv='expires' content='0'>
+    <link rel="shortcut icon" href="#" />
+</head>
+
+<body>
+
+    <style>
+        body {
+            background-color: #f0f0f5; /* Change background color */
+        }
+
+        #localUser {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 256px;
+            height: 256px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #outputImage {
+            visibility: hidden;
+        }
+
+        #inputText {
+            width: 400px; /* Increase input box width */
+            height: 40px; /* Increase input box height */
+            margin: 8px 0;
+            display: inline-block;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 18px; /* Increase font size */
+            padding: 8px; /* Add padding inside the input box */
+        }
+    </style>
+
+    <div id="localUser">
+        <div id="localUserName"></div>
+        <img id="outputImage" width="256" height="400">
+
+        <input type="text" id="inputText" placeholder="Describe yourself">
+
+        <div id="feedback"></div>
+    </div>
+    <script src="main.js" type="module"></script>
+
+</body>
+
+</html>
